@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Bot Connector</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 WhatsApp Bot Connector</h1>
+            <p>Hubungkan WhatsApp Anda sebagai Bot</p>
+        </div>
+        
+        <div class="connection-form">
+            <div class="form-group">
+                <label for="phoneNumber">Nomor WhatsApp</label>
+                <input type="tel" id="phoneNumber" placeholder="6281234567890" />
+                <small>Masukkan nomor dengan format 628xxxxxxxxx (tanpa + atau 0)</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Metode Koneksi</label>
+                <div class="radio-group">
+                    <label>
+                        <input type="radio" name="method" value="qr" checked> QR Code
+                    </label>
+                    <label>
+                        <input type="radio" name="method" value="pairing"> Pairing Code
+                    </label>
+                </div>
+            </div>
+            
+            <button id="connectBtn" class="btn-primary">🔌 Connect Bot</button>
+        </div>
+        
+        <div id="statusCard" class="status-card hidden">
+            <h3>Status Koneksi</h3>
+            <div id="connectionStatus" class="status-disconnected">
+                <span class="status-icon">⚪</span>
+                <span class="status-text">Belum terhubung</span>
+            </div>
+            
+            <div id="qrContainer" class="qr-container hidden">
+                <h4>Scan QR Code</h4>
+                <div id="qrCode"></div>
+                <p>Scan QR code di WhatsApp > Linked Devices</p>
+            </div>
+            
+            <div id="pairingContainer" class="pairing-container hidden">
+                <h4>Pairing Code</h4>
+                <div id="pairingCode" class="pairing-code"></div>
+                <p>Masukkan kode ini di WhatsApp > Linked Devices > Link with phone number</p>
+            </div>
+        </div>
+        
+        <div id="botCommands" class="bot-commands hidden">
+            <h3>📋 Command Bot</h3>
+            <div class="commands-list">
+                <div class="command-item">
+                    <code>#start</code>
+                    <span>Memulai bot</span>
+                </div>
+                <div class="command-item">
+                    <code>#menu</code>
+                    <span>Menampilkan menu utama</span>
+                </div>
+                <div class="command-item">
+                    <code>#confess &lt;nomor&gt; &lt;pesan&gt;</code>
+                    <span>Kirim confess ke nomor lain</span>
+                </div>
+                <div class="command-item">
+                    <code>#help</code>
+                    <span>Bantuan perintah</span>
+                </div>
+                <div class="command-item">
+                    <code>#info</code>
+                    <span>Informasi bot</span>
+                </div>
+                <div class="command-item">
+                    <code>#stats</code>
+                    <span>Statistik bot</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
