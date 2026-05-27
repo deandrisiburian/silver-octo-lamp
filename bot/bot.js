@@ -1,7 +1,17 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeInMemoryStore } = require('@whiskeysockets/baileys');
+const express = require('express');
+const cors = require('cors');
 const Pino = require('pino');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+
+// Setup Express untuk health check dan API
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, '../public')));
 
 let sock = null;
 let isConnected = false;
@@ -22,16 +32,29 @@ let botStats = {
   commandsUsed: {}
 };
 
-// Fungsi koneksi WhatsApp
+// Fungsi koneksi WhatsApp dengan pairing code support
 async function connectToWhatsApp(phoneNumber = null, method = 'qr') {
-  const authFolder = path.join(__dirname, '../auth_info');
+  // Gunakan volume persistent untuk Railway
+  const authFolder = process.env.RAILWAY_VOLUME_MOUNT_PATH 
+    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'auth_info')
+    : path.join(__dirname, '../auth_info');
+  
+  // Pastikan folder auth exists
+  if (!fs.existsSync(authFolder)) {
+    fs.mkdirSync(authFolder, { recursive: true });
+  }
+  
   const { state, saveCreds } = await useMultiFileAuthState(authFolder);
   
   sock = makeWASocket({
     logger: Pino({ level: 'silent' }),
     printQRInTerminal: method === 'qr',
     auth: state,
-    browser: ['WhatsApp Bot', 'Chrome', '1.0.0']
+    browser: ['WhatsApp Bot', 'Chrome', '1.0.0'],
+    // Untuk Railway, penting untuk reconnect otomatis
+    connectTimeoutMs: 60000,
+    defaultQueryTimeoutMs: 60000,
+    keepAliveIntervalMs: 10000
   });
   
   store.bind(sock.ev);
@@ -39,6 +62,8 @@ async function connectToWhatsApp(phoneNumber = null, method = 'qr') {
   // Event connection update
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
+    
+    console.log('Connection update:', connection, update);
     
     if (qr && method === 'qr') {
       connectionInfo.qrCode = qr;
@@ -48,21 +73,22 @@ async function connectToWhatsApp(phoneNumber = null, method = 'qr') {
     
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('Connection closed due to', lastDisconnect?.error, ', reconnecting:', shouldReconnect);
+      console.log('Connection closed, reconnecting:', shouldReconnect);
       connectionInfo.status = 'disconnected';
       isConnected = false;
       
       if (shouldReconnect) {
-        setTimeout(() => connectToWhatsApp(phoneNumber, method), 3000);
+        console.log('Attempting to reconnect in 5 seconds...');
+        setTimeout(() => connectToWhatsApp(phoneNumber, method), 5000);
       }
     } else if (connection === 'open') {
-      console.log('Connected to WhatsApp!');
+      console.log('✓ Connected to WhatsApp!');
       connectionInfo.status = 'connected';
       connectionInfo.qrCode = null;
       connectionInfo.pairingCode = null;
       isConnected = true;
       
-      if (phoneNumber && method === 'pairing') {
+      if (phoneNumber && method === 'pairing' && !sock.authState.creds.registered) {
         try {
           const code = await sock.requestPairingCode(phoneNumber);
           connectionInfo.pairingCode = code;
@@ -96,7 +122,7 @@ async function connectToWhatsApp(phoneNumber = null, method = 'qr') {
   return sock;
 }
 
-// Handler command
+// Handler command (sama seperti sebelumnya)
 async function handleCommand(sender, message) {
   const msg = message.trim().toLowerCase();
   const prefix = '#';
@@ -106,7 +132,6 @@ async function handleCommand(sender, message) {
   const args = msg.slice(1).split(' ');
   const command = args[0];
   
-  // Update statistik command
   botStats.commandsUsed[command] = (botStats.commandsUsed[command] || 0) + 1;
   
   switch(command) {
@@ -201,5 +226,81 @@ function formatUptime(ms) {
   return `${hours}h ${minutes}m ${secs}s`;
 }
 
-// Export untuk API
-module.exports = { connectToWhatsApp, getStatus: () => connectionInfo, getStats: () => botStats, sock: () => sock };
+// API Endpoints untuk integrasi dengan website
+app.get('/api/status', (req, res) => {
+  res.json({
+    ...connectionInfo,
+    stats: {
+      uptime: Date.now() - botStats.startTime,
+      messagesProcessed: botStats.messagesProcessed,
+      commandsUsed: botStats.commandsUsed
+    },
+    isConnected
+  });
+});
+
+app.post('/api/connect', async (req, res) => {
+  const { phoneNumber, method } = req.body;
+  
+  try {
+    await connectToWhatsApp(phoneNumber, method);
+    
+    // Tunggu sebentar untuk generate kode
+    setTimeout(() => {
+      res.json({
+        success: true,
+        status: connectionInfo.status,
+        qrCode: connectionInfo.qrCode,
+        pairingCode: connectionInfo.pairingCode,
+        message: method === 'qr' ? 'QR Code generated' : 'Pairing code generated'
+      });
+    }, 2000);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/send-message', async (req, res) => {
+  const { to, message } = req.body;
+  
+  if (!sock || !isConnected) {
+    return res.status(400).json({ error: 'Bot not connected' });
+  }
+  
+  try {
+    await sock.sendMessage(`${to}@s.whatsapp.net`, { text: message });
+    res.json({ success: true, message: 'Message sent' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Serve frontend untuk root path
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// Start server dan bot
+async function start() {
+  console.log('🚀 Starting WhatsApp Bot on Railway...');
+  console.log(`📡 Web server running on port ${PORT}`);
+  
+  // Start Express server
+  app.listen(PORT, () => {
+    console.log(`✅ Web interface available at http://localhost:${PORT}`);
+  });
+  
+  // Auto-connect jika ada session tersimpan
+  const authFolder = process.env.RAILWAY_VOLUME_MOUNT_PATH 
+    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'auth_info')
+    : path.join(__dirname, '../auth_info');
+  
+  if (fs.existsSync(authFolder) && fs.readdirSync(authFolder).length > 0) {
+    console.log('📱 Existing session found, attempting to reconnect...');
+    await connectToWhatsApp(null, 'qr');
+  } else {
+    console.log('🆕 No existing session, waiting for connection via web interface...');
+  }
+}
+
+start().catch(console.error);
